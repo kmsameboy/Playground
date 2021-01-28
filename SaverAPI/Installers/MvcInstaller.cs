@@ -1,11 +1,14 @@
-﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using FluentValidation.AspNetCore;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
+using SaverAPI.Authorization;
+using SaverAPI.Filters;
 using SaverAPI.Options;
 using SaverAPI.Services;
-using System.Collections.Generic;
 using System.Text;
 
 namespace SaverAPI.Installers
@@ -20,8 +23,15 @@ namespace SaverAPI.Installers
 
             services.AddScoped<IIdentityService, IdentityService>();
 
-            services.AddControllersWithViews();
-            services.AddRazorPages();
+            //services.AddControllersWithViews();
+            services.AddMvc(options =>
+            {
+                options.EnableEndpointRouting = false;
+                options.Filters.Add<ValidationFilter>();
+            })
+            .AddFluentValidation(mvcConfiguration => mvcConfiguration.RegisterValidatorsFromAssemblyContaining<Startup>())
+            .SetCompatibilityVersion(Microsoft.AspNetCore.Mvc.CompatibilityVersion.Version_3_0);
+            //services.AddRazorPages();
 
             var tokenValidationParameters = new TokenValidationParameters
             {
@@ -47,43 +57,22 @@ namespace SaverAPI.Installers
                 x.TokenValidationParameters = tokenValidationParameters;
             });
 
-            services.AddSwaggerGen(x =>
+            services.AddAuthorization(options =>
             {
-                x.SwaggerDoc("v1", new OpenApiInfo { Title = "Saver API", Version = "v1" });
-
-                //var security = new OpenApiSecurityRequirement();
-
-                var security = new Dictionary<string, IEnumerable<string>>
+                options.AddPolicy("MustWorkForChapsas", policy =>
                 {
-                    {"Bearer", new string[0]}
-                };
-
-                x.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-                {
-                    Description = "JWT Authorization header using the Bearer scheme. \r\n\r\n Enter 'Bearer' [space] and then your token in the text input below.\r\n\r\nExample: \"Bearer 12345abcdef\"",
-                    Name = "Authorization",
-                    In = ParameterLocation.Header,
-                    Type = SecuritySchemeType.ApiKey,
-                    Scheme = "Bearer"
+                    policy.AddRequirements(new WorksForCompanyRequirement("chapsas.com"));
                 });
-                x.AddSecurityRequirement(new OpenApiSecurityRequirement()
-                {
-                    {
-                        new OpenApiSecurityScheme
-                        {
-                            Reference = new OpenApiReference
-                            {
-                                Type = ReferenceType.SecurityScheme,
-                                Id = "Bearer"
-                            },
-                            Scheme = "oauth2",
-                            Name = "Bearer",
-                            In = ParameterLocation.Header,
+            });
 
-                        },
-                        new List<string>()
-                    }
-                });
+            services.AddSingleton<IAuthorizationHandler, WorksForCompanyHandler>();
+
+            services.AddSingleton<IUriService>(provider =>
+            {
+                var accessor = provider.GetRequiredService<IHttpContextAccessor>();
+                var request = accessor.HttpContext.Request;
+                var absoluteUri = string.Concat(request.Scheme, "://", request.Host.ToUriComponent(), "/");
+                return new UriService(absoluteUri);
             });
         }
     }
